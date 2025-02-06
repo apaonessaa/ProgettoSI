@@ -8,7 +8,10 @@ pragma solidity >=0.8.2 <0.9.0;
 struct Product {
     uint pid;
     string name;
-    // others
+    string size;
+    string color;
+    string category;
+    string fabric;
 }
 
 struct Device {
@@ -32,23 +35,19 @@ import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 contract AProgettoSI is Ownable, AccessControl {
     // State
     State state = State.INACTIVE;
-
     // Roles
-    bytes32 public constant PRODUCTOR_ADMIN = keccak256("PRODUCTOR_ADMIN_ROLE");
-    bytes32 public constant PRODUCTOR = keccak256("PRODUCTOR_ROLE");
+    bytes32 public constant PRODUCER = keccak256("PRODUCER_ROLE");
 
     constructor() Ownable(msg.sender) {
         // Assegnazione del ruolo di ADMIN al proprietario dello SC 
-        _setRoleAdmin(PRODUCTOR, PRODUCTOR_ADMIN);
-        _grantRole(PRODUCTOR_ADMIN,msg.sender);
-
+        _grantRole(DEFAULT_ADMIN_ROLE,msg.sender);
         // Attivazione dello smart contract
         state=State.ACTIVE;
     }
 
-    modifier isActive() {
-        require(state==State.ACTIVE, " It is required an active state to perform the action. ");
-        _;
+    // Role
+    function registerProducer(address account) external isActive onlyOwner {
+        grantRole(PRODUCER, account);
     }
 
     // Active & Disactive
@@ -56,7 +55,12 @@ contract AProgettoSI is Ownable, AccessControl {
     //    state=State.ACTIVE;
     //} 
 
-    function inactive() public onlyOwner isActive {
+    modifier isActive() {
+        require(state==State.ACTIVE, " It is required an active state to perform the action. ");
+        _;
+    }
+
+    function inactivate() public onlyOwner isActive {
         state=State.INACTIVE;
     } 
 }
@@ -95,7 +99,7 @@ contract ProgettoSI is AProgettoSI() {
 
     function registerDevice(uint did, address dpk) external 
         isActive
-        onlyRole(PRODUCTOR)
+        onlyRole(PRODUCER)
         notExistDevice(did)
         returns(uint) 
     {
@@ -108,7 +112,6 @@ contract ProgettoSI is AProgettoSI() {
 
     function getDevice(uint did) public view 
         isActive
-        onlyRole(PRODUCTOR)
         existDevice(did)
         returns(Device memory) 
     {
@@ -142,14 +145,14 @@ contract ProgettoSI is AProgettoSI() {
         _;
     }
 
-    function registerProduct(uint pid, string memory name) external 
+    function registerProduct(uint pid, string memory name, string memory size, string memory color, string memory category, string memory fabric) external 
         isActive
-        onlyRole(PRODUCTOR)
+        onlyRole(PRODUCER)
         notExistProduct(pid)
         returns(uint)
     {
         products.push(
-            Product(pid,name)
+            Product(pid,name,size,color,category,fabric)
         );
         pmap[pid]=products.length-1;
         return pid;
@@ -157,7 +160,6 @@ contract ProgettoSI is AProgettoSI() {
 
     function getProduct(uint pid) public view 
         isActive
-        onlyRole(PRODUCTOR)
         existProduct(pid)
         returns(Product memory) 
     {
@@ -171,31 +173,37 @@ contract ProgettoSI is AProgettoSI() {
         return products.length;
     }
 
-    // Combination did => pid
-    mapping(uint => uint) private combination; 
-
-    function _existCombination(uint pid, uint did) private view
-        existDevice(did)
-        existProduct(pid)
-        returns(bool) 
-    {
-        return combination[did]>0;
-    }
-
-    modifier notExistCombination(uint pid, uint did) {
-        require(!_existCombination(pid,did), " The combination already exists. ");
-        _;
-    }
+    // Combination: did => pid, pid => did
+    mapping(uint => uint) private dcombine; 
+    mapping(uint => uint) private pcombine; 
 
     function combine(uint pid, uint did) external 
         isActive
-        onlyRole(PRODUCTOR)
-        notExistCombination(did,pid)
+        onlyRole(PRODUCER)
+        existDevice(did)
+        existProduct(pid)
         returns(Device memory, Product memory) 
     {
-        combination[did]=pid;   
+        require(dcombine[did]==0, " The device is already combined. ");
+        require(pcombine[pid]==0, " The product is already combined. ");
+        dcombine[did]=pid;   
+        pcombine[pid]=did;
         return (this.getDevice(did), this.getProduct(pid));
     }
 
-    //TODO get combination
+    function getProductCombined(uint did) public view
+        isActive
+        existDevice(did)
+        returns(uint) 
+    {
+        return dmap[did];
+    }
+        
+    function getDeviceCombined(uint pid) public view
+        isActive
+        existProduct(pid)
+        returns(uint) 
+    {
+        return pmap[pid];
+    }
 }
