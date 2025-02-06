@@ -17,6 +17,11 @@ struct Device {
     uint ts_registration;
 }
 
+enum State {
+    INACTIVE, 
+    ACTIVE
+}
+
 /*
 *   Access Control Policy 
 */
@@ -24,7 +29,10 @@ struct Device {
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 
-contract ACProgettoSI is Ownable, AccessControl {
+contract AProgettoSI is Ownable, AccessControl {
+    // State
+    State state = State.INACTIVE;
+
     // Roles
     bytes32 public constant PRODUCTOR_ADMIN = keccak256("PRODUCTOR_ADMIN_ROLE");
     bytes32 public constant PRODUCTOR = keccak256("PRODUCTOR_ROLE");
@@ -33,85 +41,84 @@ contract ACProgettoSI is Ownable, AccessControl {
         // Assegnazione del ruolo di ADMIN al proprietario dello SC 
         _setRoleAdmin(PRODUCTOR, PRODUCTOR_ADMIN);
         _grantRole(PRODUCTOR_ADMIN,msg.sender);
+
+        // Attivazione dello smart contract
+        state=State.ACTIVE;
     }
 
-    // Activate & Disactivate 
+    modifier isActive() {
+        require(state==State.ACTIVE, " It is required an active state to perform the action. ");
+        _;
+    }
+
+    // Active & Disactive
+    //function active() public onlyOwner onlyState(State.INACTIVE) {
+    //    state=State.ACTIVE;
+    //} 
+
+    function inactive() public onlyOwner isActive {
+        state=State.INACTIVE;
+    } 
 }
 
 /*
 *   Business Logic
 */
 
-contract ProgettoSI is ACProgettoSI() {
+contract ProgettoSI is AProgettoSI() {
 
     // Data Structure
-    mapping(address => uint) private dmap;
+    mapping(uint => uint) private dmap; // did>0
     Device[] private devices;
-    mapping(uint => uint) private pmap;
+    mapping(uint => uint) private pmap; // pid>0
     Product[] private products;
-
-    constructor() {
-        // Init devices
-        devices.push(
-            Device(0,address(0x0),block.timestamp)
-        );
-        // In questo modo, nella struttura dmap, affinche' 
-        // un device sia stato registrato, deve avere un id>0.
-        // Il numero di devices coincide con devices.length-1
-
-        // Init products
-        products.push(
-            Product(0,"NO PRODUCT")
-        );
-    }
 
     // Device Utility
 
-    function _existDevice(address pubkey) private view returns(bool) {
-        return dmap[pubkey]>0;
+    function _existDevice(uint did) private view returns(bool) {
+        return dmap[did]>0;
     }
 
-    function _isValidDevice(address pubkey) private pure returns(bool) {
-        return pubkey!=address(0x0);
-    }
-
-    modifier existDevice(address pubkey) {
+    modifier existDevice(uint did) {
         require(
-            _isValidDevice(pubkey) && _existDevice(pubkey), 
+            _existDevice(did), 
             " The device is not registered. ");
         _;
     }
 
-    modifier notExistDevice(address pubkey) {
+    modifier notExistDevice(uint did) {
         require(
-            _isValidDevice(pubkey) && !_existDevice(pubkey), 
+            !_existDevice(did), 
             " The device is already registered. ");
         _;
     }
 
-    function registerDevice(address device_pubkey) external 
+    function registerDevice(uint did, address dpk) external 
+        isActive
         onlyRole(PRODUCTOR)
-        notExistDevice(device_pubkey) 
+        notExistDevice(did)
         returns(uint) 
     {
-        uint did=devices.length;
         devices.push(
-            Device(did,device_pubkey,block.timestamp)
+            Device(did,dpk,block.timestamp)
         );
-        dmap[device_pubkey]=did;
+        dmap[did]=devices.length-1;
         return did;
     }
 
-    function getDevice(address device_pubkey) public view 
+    function getDevice(uint did) public view 
+        isActive
         onlyRole(PRODUCTOR)
-        existDevice(device_pubkey)
+        existDevice(did)
         returns(Device memory) 
     {
-       uint i=dmap[device_pubkey];
-        return devices[i];
+        return devices[ dmap[did] ];
     }
 
-    function getNumOfDevices() public view returns(uint) {
+    function getNumOfDevices() public view 
+        isActive
+        returns(uint) 
+    {
         return devices.length-1;
     }
 
@@ -136,25 +143,59 @@ contract ProgettoSI is ACProgettoSI() {
     }
 
     function registerProduct(uint pid, string memory name) external 
+        isActive
         onlyRole(PRODUCTOR)
         notExistProduct(pid)
+        returns(uint)
     {
         products.push(
             Product(pid,name)
         );
         pmap[pid]=products.length-1;
+        return pid;
     }
 
     function getProduct(uint pid) public view 
+        isActive
         onlyRole(PRODUCTOR)
         existProduct(pid)
         returns(Product memory) 
     {
-        uint i=pmap[pid];
-        return products[i];
+        return products[ pmap[pid] ];
     }
 
-    function getNumOfProduct() public view returns(uint) {
-        return products.length-1;
+    function getNumOfProduct() public view 
+        isActive
+        returns(uint) 
+    {
+        return products.length;
     }
+
+    // Combination did => pid
+    mapping(uint => uint) private combination; 
+
+    function _existCombination(uint pid, uint did) private view
+        existDevice(did)
+        existProduct(pid)
+        returns(bool) 
+    {
+        return combination[did]>0;
+    }
+
+    modifier notExistCombination(uint pid, uint did) {
+        require(!_existCombination(pid,did), " The combination already exists. ");
+        _;
+    }
+
+    function combine(uint pid, uint did) external 
+        isActive
+        onlyRole(PRODUCTOR)
+        notExistCombination(did,pid)
+        returns(Device memory, Product memory) 
+    {
+        combination[did]=pid;   
+        return (this.getDevice(did), this.getProduct(pid));
+    }
+
+    //TODO get combination
 }
