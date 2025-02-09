@@ -27,12 +27,12 @@ abstract contract AbstractProgettoSI is Ownable, AccessControl {
         require(state==State.INACTIVE, "It is required an inactive state to perform the action.");
         state=State.ACTIVE;
         emit ContractState("ACTIVE",block.timestamp);
-    } 
+    }
 
     function deactivate() public isActive onlyOwner {
         state=State.INACTIVE;
         emit ContractState("INACTIVE",block.timestamp);
-    } 
+    }
 
     // Metodi per l'assegnamento e revoca del ruolo di Producer
     function registerProducer(address account) external isActive {
@@ -53,6 +53,13 @@ abstract contract AbstractProgettoSI is Ownable, AccessControl {
 }
 
 contract ProgettoSI is AbstractProgettoSI {
+
+    struct Device {
+        uint did;
+        address pubkey;
+        uint timestamp;
+    }
+
     struct Product {
         uint pid;
         string name;
@@ -62,37 +69,35 @@ contract ProgettoSI is AbstractProgettoSI {
         string fabric;
     }
 
-    struct Device {
-        uint did;
-        address pubkey;
-        uint timestamp;
-    }
-
-    mapping(uint => uint) private dmap; // did => index>0
-    Device[] private devices;           // devices.length-1 elementi di tipo Device
-    mapping(uint => uint) private pmap; // pid => index>0
-    Product[] private products;         // devices.length-1 elementi di tipo Product
+    mapping(uint => uint) private dmap; // did => index>0,      dmap[did]=index => devices[index]=Device(did)
+    Device[] private devices;           // devices.length-1
+    mapping(uint => uint) private pmap; // pid>0 => index>0,    pmap[pip]=index => products[index]=Product(pid)
+    Product[] private products;         // devices.length-1
 
     // Events
     event DeviceRegistered(uint indexed did, address dpk, uint timestamp, address producer);
     event ProductRegistered(uint indexed pid, string name, string size, string color, string prodType, string fabric, uint timestamp, address producer);
 
     constructor() Ownable(msg.sender) {
-        // Con il deployment dello smart contract, il deployer diventa sia proprietario 
-        // dello stesso che admin per la gestione del ruolo di Producer; lo smart contract 
-        // viene attivato.
+        // Con il deployment dello smart contract, il deployer diventa sia proprietario dello stesso che admin per la gestione 
+        // del ruolo di Producer. Lo smart contract viene attivato.
         _grantRole(DEFAULT_ADMIN_ROLE,msg.sender);
         activate();
         
-        // Inizializzazione delle strutture devices e products. 
-        // L'idea e' quella di associare a did (device id) e a pid (product id) un indice
-        // delle rispettive strutture dati, devices e products.
-        // Per evitare le ambiguità con l'indice 0, si e' pensato di inizializzare
-        // le due strutture con due elementi "dummy".
-        // Tutte le registrazioni associeranno a dmap[did] e pmap[pid] un indice>0.
-        // Se dmap[did]=0 allora significa che non e' stato registrato alcun device con 
-        // l'identificativo did, altrimenti dmap[did]=i>0 che corrisponde al Device associato
-        // in devices[i]. Stesso discorso per pmap e products. 
+        // Inizializzazione delle strutture devices e products.
+        // L'idea e' quella di avere nelle mappe pmap e dmap le associazioni tra device identifier (did) e product identifier (pid)
+        // con i corrispettivi oggetti Device e Product che sono contenuti in devices e products.
+        //
+        //      dmap[did] = index per cui devices[index] = Device(did)
+        //
+        // Per evitare le ambiguità con l'indice 0, si e' pensato di inizializzare le due strutture con un elemento "dummy".
+        // 
+        // Tutte le registrazioni associeranno a dmap[did] e pmap[pid] un index>0.
+        //
+        // Se dmap[did]=0 significa che non e' stato registrato alcun device con l'identificativo did, altrimenti dmap[did]=index
+        // corrisponde al Device gia' registrato e contenuto in devices[index].
+        //
+        // Stesso discorso per pmap e products.
         devices.push(Device(0,address(0x0),0));
         products.push(Product(0,"","","","",""));
     }
@@ -159,8 +164,9 @@ contract ProgettoSI is AbstractProgettoSI {
         _;
     }
 
-    // Per evitare ambiguita' con il collegamento di un device ad un prodotto (parte successiva 
-    // del codice) si e' deciso di definire un vincolo sul valore che lo identifica.
+    // Per evitare ambiguita' con il collegamento di un device ad un prodotto (si guardi la parte di codice
+    // per la gestione dei links) si e' deciso di definire un vincolo sul valore che lo identifica.
+    // Per cui si ha che pid != 0.
     modifier notExistProduct(uint pid) {
         require(pid!=0, "The product identifier is not valid.");
         require(!_existProduct(pid), "The product is already registered.");
@@ -204,15 +210,16 @@ contract ProgettoSI is AbstractProgettoSI {
         return products.length-1; // non considera l'elemento dummy
     }
 
-    // Gestione dei collegamenti tra devices e products
+    // Gestione dei collegamenti tra Device e Product
+    // Si e' considerato il contesto in cui un Device e' collegato ad esclusivamente un Product, mentre un Product
+    // puo' essere collegato ad uno o piu' Device.
     mapping(uint => uint) private dlinks;       // dlinks[did]=pid
     mapping(uint => uint[]) private plinks;     // plinks[pid]=[did,...]
 
     event Linked(uint indexed did, uint indexed pid, uint timestamp, address producer);
 
-    // Per il vincolo imposto durante la registrazione di un prodotto, il suo identificativo
-    // deve essere un valore numerico diverso da zero. Quindi, se dlinks[did]=0 significa che
-    // il device con identificativo did non e' associato a nessun product!
+    // Per il vincolo imposto durante la registrazione di un prodotto (pid>0) se dlinks[did]=0 significa che
+    // il Device con identificativo did non e' associato a nessun product!
     function link(uint pid, uint did) external 
         isActive
         onlyRole(PRODUCER)
@@ -221,9 +228,6 @@ contract ProgettoSI is AbstractProgettoSI {
         returns(Device memory, Product memory) 
     {
         require(dlinks[did]==0, "The device is already linked to other product.");
-        for(uint i=0; i<plinks[pid].length; i++){
-            require(plinks[pid][i]!=did, "The product is already linked with this device.");
-        }
         dlinks[did]=pid; 
         plinks[pid].push(did);
         emit Linked(did, pid, block.timestamp, msg.sender);
